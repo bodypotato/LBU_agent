@@ -2,9 +2,9 @@
 
 - checkpointer 使用 InMemorySaver（进程内）。地基阶段先跑通，后续可平滑替换为
   RedisSaver —— LinkBetweenUs 后端本就依赖 Redis，部署环境天然具备。
-- thread_id 对应 LBU 中「用户 account × ai_bot」的对话，与后端 Dify 方案的
-  conversation_id 语义一致：同一用户连续对话传同一个 thread_id 即延续上下文。
-- clear(thread_id) 等价于后端 /api/dify/conversation 的清空上下文能力。
+- thread_id 对应「用户 account × ai_bot」的独立对话，同一用户连续对话传同一个
+  thread_id 即延续上下文。
+- clear(thread_id) 支持按会话清空上下文。
 """
 
 from langchain_core.runnables import RunnableConfig

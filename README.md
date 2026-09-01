@@ -1,7 +1,8 @@
 # LBU Agent
 
 LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGraph** 构建，
-对接本机 **Ollama**（qwen3:4b），作为后端 Dify 方案的本地化替代 / 演进方向。
+对接本机 **Ollama**（qwen3:4b）。**独立于后端 Dify 方案的 agent**，拥有自己的
+会话记忆、工具体系和扩展路线。
 
 ## 架构
 
@@ -9,7 +10,7 @@ LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGrap
 ┌────────────────┐      ┌─────────────────────┐      ┌──────────┐
 │ LBU Client     │      │ LinkBetweenUs        │      │ LBU Agent│
 │ (Electron)     │─────▶│ (Spring Boot :8080)  │─────▶│ (FastAPI  │
-│                │      │  DifyClient / 新代理 │      │  :8000)  │
+│                │      │  独立 agent 接入层   │      │  :8000)  │
 └────────────────┘      └─────────────────────┘      └────┬─────┘
                                                           │
                                               ┌───────────┴───────────┐
@@ -74,12 +75,12 @@ uv run uvicorn main:app --reload --port 8000
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/agent/chat` | 对话。body: `{message, thread_id?}`；返回 `{reply, thread_id}` |
-| DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文（对齐后端 `/api/dify/conversation`） |
+| DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文 |
 | GET | `/api/agent/tools` | 列出已注册工具 |
 | GET | `/api/agent/health` | 健康检查（含 Ollama 连通性） |
 
-`thread_id` 语义对齐后端 Dify 方案的 `conversation_id`：同一用户与 AI 助手
-的连续对话传同一个 `thread_id` 即可延续上下文。
+`thread_id` 是本 agent 自己的会话标识：同一用户与 AI 助手的连续对话传同一个
+`thread_id` 即可延续上下文。
 
 ## 已注册工具（地基阶段）
 
@@ -93,4 +94,5 @@ uv run uvicorn main:app --reload --port 8000
 2. **持久化记忆**：`InMemorySaver` → `RedisSaver`（LBU 部署环境已有 Redis）。
 3. **图结构演进**：需要多节点编排 / 中断 / 多 agent 时，从 `create_agent`
    改为显式 `StateGraph` 或 `create_deep_agent`。
-4. **后端对接**：在 Spring Boot 端新增/替换 `DifyClient`，改为调用本服务。
+4. **后端对接**：在 Spring Boot 端新增独立的 agent 接入层，调用本服务（与既有
+   Dify 通道并存，互不影响）。

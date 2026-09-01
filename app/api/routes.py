@@ -1,7 +1,7 @@
 """Agent HTTP API。
 
-响应统一遵循 LinkBetweenUs 的 Result 约定 {code, message, data}，
-接口语义对齐后端 Dify 方案（对话 / 清空上下文），便于后续直接替换。
+响应统一遵循 LinkBetweenUs 的 Result 约定 {code, message, data}。
+LBU_agent 是独立于后端 Dify 方案的 agent 服务。
 """
 
 import httpx
@@ -37,7 +37,7 @@ async def chat(req: ChatRequest) -> Result[ChatData]:
 
 @router.delete("/conversation/{thread_id}", response_model=Result[None])
 async def clear_conversation(thread_id: str) -> Result[None]:
-    """清空指定会话的上下文（对齐后端 /api/dify/conversation）。"""
+    """清空指定会话的上下文。"""
     memory.clear(thread_id)
     return Result.ok(None)
 

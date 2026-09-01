@@ -3,7 +3,7 @@
 响应统一采用 LinkBetweenUs 后端的 Result 约定：
     {"code": 200, "message": "ok", "data": {...}}
 成功 code=200，失败 code=4xx/5xx —— 与 Spring Boot 端的 Result<T> 保持一致，
-方便后端 DifyClient / 前端直接对接。
+方便后端 / 前端直接对接。
 """
 
 from typing import Any, Generic, TypeVar
