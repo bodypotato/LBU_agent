@@ -1,0 +1,25 @@
+### 健康检查
+GET http://localhost:8000/api/agent/health
+
+### 查看已注册工具
+GET http://localhost:8000/api/agent/tools
+
+### 对话（新建会话）
+POST http://localhost:8000/api/agent/chat
+Content-Type: application/json
+
+{
+  "message": "你好，介绍一下你自己"
+}
+
+### 对话（延续上文：thread_id 用上一步返回的值）
+POST http://localhost:8000/api/agent/chat
+Content-Type: application/json
+
+{
+  "message": "LBU 后端服务现在在线吗？",
+  "thread_id": "default"
+}
+
+### 清空会话上下文
+DELETE http://localhost:8000/api/agent/conversation/default
