@@ -45,8 +45,12 @@ class Settings(BaseSettings):
     embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_device: str = "cpu"
     chroma_persist_dir: str = "./chroma_db"
-    lbu_doc_path: str = "docs/LBU.md"
+    rag_doc_dir: str = "docs"  # 全部 .md 均为文档源，按文件增量建索引
     rag_top_k: int = 4
+
+    # ---- 上下文裁剪（超长对话自动压缩，SummarizationMiddleware）----
+    summary_trigger_messages: int = 20  # 消息数达到该值触发压缩
+    summary_keep_messages: int = 4  # 压缩后保留的最新消息数
 
     @property
     def ollama_native_url(self) -> str:
