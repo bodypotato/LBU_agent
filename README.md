@@ -19,9 +19,9 @@ LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGrap
                                               │  ├─ model: ChatOllama  │
                                               │  ├─ tools: 内置+LBU工具 │
                                               │  └─ checkpointer(记忆)  │
-                                              └───────────┬───────────┘
-                                                          │
-                                                    Ollama (qwen3:4b)
+                                              └─────┬─────────┬───────┘
+                                                    │         │
+                                          Ollama (qwen3:4b)  Redis (会话持久化)
 ```
 
 ## 项目结构
@@ -36,7 +36,7 @@ LBU_agent/
 │   ├── agent/
 │   │   ├── llm.py           # LLM 工厂（ChatOllama，参数来自 .env）
 │   │   ├── prompt.py        # 贴合 LBU 的 system prompt
-│   │   ├── memory.py        # 会话记忆（thread_id 粒度，支持清空上下文）
+│   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空上下文）
 │   │   ├── tools.py         # 工具注册（内置工具 + 后续 LBU 业务工具）
 │   │   └── graph.py         # create_agent 构建 LangGraph agent
 │   └── api/
@@ -67,6 +67,8 @@ uv run uvicorn main:app --reload --port 8000
 | `AGENT_TEMPERATURE` | 采样温度 | `0.7` |
 | `AGENT_TIMEOUT` | LLM 单次请求超时（秒） | `120` |
 | `LBU_BACKEND_BASE_URL` | LinkBetweenUs 后端地址（工具对接用） | `http://localhost:8080` |
+| `REDIS_URL` | Redis 地址（会话 checkpointer 持久化） | `http://localhost:6379` |
+| `REDIS_PASSWORD` | Redis 密码（为空则不认证） | 空 |
 
 ## HTTP API
 
@@ -91,7 +93,8 @@ uv run uvicorn main:app --reload --port 8000
 
 1. **LBU 业务工具**：在 `app/agent/tools/` 下按后端模块组织（friend / chat / group /
    online / user），通过后端 REST API（JWT）读取真实数据。
-2. **持久化记忆**：`InMemorySaver` → `RedisSaver`（LBU 部署环境已有 Redis）。
+2. **持久化记忆**：已完成 `InMemorySaver` → `AsyncRedisSaver`，会话历史落盘 Redis，
+   服务重启上下文不丢；后续可考虑为 checkpoint 配置 TTL 或按用户维度清理。
 3. **图结构演进**：需要多节点编排 / 中断 / 多 agent 时，从 `create_agent`
    改为显式 `StateGraph` 或 `create_deep_agent`。
 4. **后端对接**：在 Spring Boot 端新增独立的 agent 接入层，调用本服务（与既有

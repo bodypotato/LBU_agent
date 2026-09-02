@@ -38,7 +38,7 @@ async def chat(req: ChatRequest) -> Result[ChatData]:
 @router.delete("/conversation/{thread_id}", response_model=Result[None])
 async def clear_conversation(thread_id: str) -> Result[None]:
     """清空指定会话的上下文。"""
-    memory.clear(thread_id)
+    await memory.clear(thread_id)
     return Result.ok(None)
 
 
