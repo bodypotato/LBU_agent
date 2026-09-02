@@ -21,5 +21,8 @@ Content-Type: application/json
   "thread_id": "default"
 }
 
-### 清空会话上下文
+### 查询会话历史记录（仅展示用，MySQL 落库）
+GET http://localhost:8000/api/agent/history/default
+
+### 清空会话上下文与历史记录
 DELETE http://localhost:8000/api/agent/conversation/default

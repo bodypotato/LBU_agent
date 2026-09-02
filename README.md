@@ -33,6 +33,7 @@ LBU_agent/
 ├── app/
 │   ├── config.py            # pydantic-settings 读取 .env
 │   ├── schemas.py           # 请求/响应模型（沿用 LBU 的 Result{code,message,data} 约定）
+│   ├── storage.py           # 历史对话存储（MySQL 落库，仅展示用，不参与上下文）
 │   ├── agent/
 │   │   ├── llm.py           # LLM 工厂（ChatOllama，参数来自 .env）
 │   │   ├── prompt.py        # 贴合 LBU 的 system prompt
@@ -69,6 +70,14 @@ uv run uvicorn main:app --reload --port 8000
 | `LBU_BACKEND_BASE_URL` | LinkBetweenUs 后端地址（工具对接用） | `http://localhost:8080` |
 | `REDIS_URL` | Redis 地址（会话 checkpointer 持久化） | `http://localhost:6379` |
 | `REDIS_PASSWORD` | Redis 密码（为空则不认证） | 空 |
+| `MYSQL_HOST` | MySQL 地址（历史对话存储，仅展示用） | `localhost` |
+| `MYSQL_PORT` | MySQL 端口 | `3306` |
+| `MYSQL_DATABASE` | 库名（与 LinkBetweenUs 共用同一实例） | `Link_Between_Us` |
+| `MYSQL_USER` | MySQL 用户 | `root` |
+| `MYSQL_PASSWORD` | MySQL 密码 | 空 |
+
+历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
+互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
 
 ## HTTP API
 
@@ -76,8 +85,9 @@ uv run uvicorn main:app --reload --port 8000
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/agent/chat` | 对话。body: `{message, thread_id?}`；返回 `{reply, thread_id}` |
-| DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文 |
+| POST | `/api/agent/chat` | 对话。body: `{message, thread_id?}`；返回 `{reply, thread_id}`。成功后自动写入 MySQL 历史 |
+| DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文与历史记录 |
+| GET | `/api/agent/history/{thread_id}` | 查询历史记录（仅展示用，按时间正序） |
 | GET | `/api/agent/tools` | 列出已注册工具 |
 | GET | `/api/agent/health` | 健康检查（含 Ollama 连通性） |
 
@@ -94,7 +104,8 @@ uv run uvicorn main:app --reload --port 8000
 1. **LBU 业务工具**：在 `app/agent/tools/` 下按后端模块组织（friend / chat / group /
    online / user），通过后端 REST API（JWT）读取真实数据。
 2. **持久化记忆**：已完成 `InMemorySaver` → `AsyncRedisSaver`，会话历史落盘 Redis，
-   服务重启上下文不丢；后续可考虑为 checkpoint 配置 TTL 或按用户维度清理。
+   服务重启上下文不丢；每次对话后调用 `aprune`（keep_latest）把 checkpoint
+   压缩为每会话一条（覆盖式，非 TTL，不丢上下文）。
 3. **图结构演进**：需要多节点编排 / 中断 / 多 agent 时，从 `create_agent`
    改为显式 `StateGraph` 或 `create_deep_agent`。
 4. **后端对接**：在 Spring Boot 端新增独立的 agent 接入层，调用本服务（与既有
