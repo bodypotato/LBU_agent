@@ -6,9 +6,10 @@
 方便后端 / 前端直接对接。
 """
 
+from datetime import datetime
 from typing import Any, Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T")
 
@@ -40,6 +41,16 @@ class ChatRequest(BaseModel):
 class ChatData(BaseModel):
     reply: str = Field(description="agent 最终回复")
     thread_id: str = Field(description="本次对话使用的会话 ID，后续请求带上以延续上下文")
+
+
+# ---- /api/agent/history/{thread_id} ----
+
+class HistoryMessage(BaseModel):
+    model_config = ConfigDict(from_attributes=True)  # 端点直接返回 ORM 对象
+
+    role: str = Field(description="消息角色：user / assistant")
+    content: str = Field(description="消息内容")
+    create_time: datetime = Field(description="写入时间")
 
 
 # ---- /api/agent/health ----

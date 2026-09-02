@@ -9,7 +9,7 @@ from app.config import get_settings
 
 @lru_cache
 def get_llm() -> ChatOllama:
-    """构建 ChatOllama 实例。
+    """构建 ChatOllama 实例（进程内单例，lru_cache 保证服务生命周期内只创建一次）。
 
     .env 中的 OLLAMA_MODEL / OLLAMA_BASE_URL 即 create_agent 的 model 参数来源；
     qwen3 支持 tool calling 与 thinking，agent 的工具调用与推理均可用。

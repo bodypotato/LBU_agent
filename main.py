@@ -3,6 +3,7 @@
 启动:  uv run uvicorn main:app --reload --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,9 +13,18 @@ from app.api.routes import router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 服务启动即预热 agent（构建 LangGraph 图 + 加载模型配置），首个请求不再等待
+    # 启动顺序：先建立 Redis checkpointer 连接，再构建 LangGraph 图（图编译时绑定 checkpointer）
     from app.agent import build_agent
+    from app.agent.memory import memory
+    from app.storage import storage
 
+    await memory.setup()
+    try:
+        await storage.setup()
+    except Exception as e:  # noqa: BLE001 —— MySQL 暂不可用时服务照常启动，历史功能降级
+        logging.getLogger(__name__).warning(
+            "MySQL 历史存储初始化失败（历史记录暂不可用）: %s", e
+        )
     build_agent()
     yield
 

@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     # ---- LinkBetweenUs 后端（供工具对接）----
     lbu_backend_base_url: str = "http://localhost:8080"
 
+    # ---- Redis（会话 checkpointer 持久化）----
+    redis_url: str = "http://localhost:6379"
+    redis_password: str = ""
+
+    # ---- MySQL（历史对话存储，仅展示用，不参与上下文）----
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_database: str = "Link_Between_Us"
+    mysql_user: str = "root"
+    mysql_password: str = ""
+
     @property
     def ollama_native_url(self) -> str:
         """Ollama 原生 API 地址。
@@ -39,6 +50,32 @@ class Settings(BaseSettings):
         """
         url = self.ollama_base_url.rstrip("/")
         return url.removesuffix("/v1")
+
+    @property
+    def redis_dsn(self) -> str:
+        """构造 redis-py / RedisSaver 使用的标准 DSN。
+
+        .env 中的 REDIS_URL 是 http://host:port 形式，统一转换为
+        redis://[:password@]host:port，密码为空则不附带认证段。
+        """
+        host_port = self.redis_url.split("://", 1)[-1].rstrip("/")
+        auth = f":{self.redis_password}@" if self.redis_password else ""
+        return f"redis://{auth}{host_port}"
+
+    @property
+    def mysql_dsn(self) -> str:
+        """构造 SQLAlchemy async 引擎使用的 MySQL DSN。
+
+        用户/密码经 URL 编码，避免特殊字符破坏 DSN；显式 utf8mb4
+        与 LinkBetweenUs 后端的建库字符集保持一致。
+        """
+        from urllib.parse import quote_plus
+
+        auth = f"{quote_plus(self.mysql_user)}:{quote_plus(self.mysql_password)}@"
+        return (
+            f"mysql+aiomysql://{auth}{self.mysql_host}:{self.mysql_port}/"
+            f"{self.mysql_database}?charset=utf8mb4"
+        )
 
 
 @lru_cache
