@@ -1,8 +1,9 @@
 """工具注册。
 
-地基阶段内置两个基础工具：
+内置工具：
 - get_current_time            通用时间查询
 - check_lbu_backend_health   探测 LinkBetweenUs 后端是否在线
+- search_lbu_docs            RAG 检索 LBU 产品文档（docs/LBU.md，父子文档模式）
 
 后续按需在 app/agent/tools/ 下按模块扩展 LBU 业务工具
 （friend / chat / group / online / user ...），扩展后在此统一注册。
@@ -13,6 +14,7 @@ from datetime import datetime
 import httpx
 from langchain_core.tools import tool
 
+from app.agent.rag import rag
 from app.config import get_settings
 
 # ===== 内置工具 =====
@@ -40,12 +42,37 @@ def check_lbu_backend_health() -> str:
         return f"LinkBetweenUs 后端（{base}）当前不可达，服务可能未启动。"
 
 
+# ===== RAG 检索工具 =====
+
+
+@tool
+def search_lbu_docs(query: str) -> str:
+    """检索 LinkBetweenUs（LBU）产品文档 docs/LBU.md 中的相关内容。
+
+    当用户询问 LBU 产品的功能、使用方法、操作流程、常见问题等产品相关问题时，
+    必须先调用本工具检索产品文档，回答严格以检索结果为准；
+    文档中没有检索到的内容要如实告知用户，不要凭记忆编造。
+    """
+    try:
+        parents = rag.search(query)
+    except Exception as e:  # noqa: BLE001 —— RAG 未就绪/模型异常时降级为提示
+        return f"产品文档检索暂不可用（{e}）。请如实告知用户稍后再试，不要编造产品信息。"
+    if not parents:
+        return "未在 LBU 产品文档中检索到相关内容。请如实告知用户该问题在文档中没有记载，不要编造。"
+    parts = []
+    for doc in parents:
+        title = doc.metadata.get("title") or "LBU 产品文档"
+        parts.append(f"【{title}】\n{doc.page_content}")
+    return "\n\n---\n\n".join(parts)
+
+
 # ===== 统一注册入口 =====
 # create_agent 的 tools 参数从这里取，后续新增工具只需加入 BUILTIN_TOOLS。
 
 BUILTIN_TOOLS: list = [
     get_current_time,
     check_lbu_backend_health,
+    search_lbu_docs,
 ]
 
 

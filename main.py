@@ -8,6 +8,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+# uvicorn 默认根日志级别为 WARNING，这里放开 INFO，让应用模块的
+# logger.info（RAG 构建状态、MySQL 初始化等）在启动日志中可见
+logging.basicConfig(level=logging.INFO)
+
 from app.api.routes import router
 
 
@@ -16,6 +20,7 @@ async def lifespan(app: FastAPI):
     # 启动顺序：先建立 Redis checkpointer 连接，再构建 LangGraph 图（图编译时绑定 checkpointer）
     from app.agent import build_agent
     from app.agent.memory import memory
+    from app.agent.rag import rag
     from app.storage import storage
 
     await memory.setup()
@@ -24,6 +29,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 —— MySQL 暂不可用时服务照常启动，历史功能降级
         logging.getLogger(__name__).warning(
             "MySQL 历史存储初始化失败（历史记录暂不可用）: %s", e
+        )
+    try:
+        await rag.setup()
+    except Exception as e:  # noqa: BLE001 —— RAG 暂不可用时服务照常启动，检索工具降级
+        logging.getLogger(__name__).warning(
+            "RAG 初始化失败（产品文档检索暂不可用）: %s", e
         )
     build_agent()
     yield

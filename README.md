@@ -19,9 +19,15 @@ LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGrap
                                               │  ├─ model: ChatOllama  │
                                               │  ├─ tools: 内置+LBU工具 │
                                               │  └─ checkpointer(记忆)  │
-                                              └─────┬─────────┬───────┘
+                                              └─────┬─────────┬───────────┘
                                                     │         │
                                           Ollama (qwen3:4b)  Redis (会话持久化)
+                                                              │
+                                                    ┌─────────┴─────────────────┐
+                                                    │ RAG（父子文档检索）        │
+                                                    │  docs/LBU.md ─▶ Chroma 向量库│
+                                                    │  + Qwen3-Embedding-0.6B   │
+                                                    └───────────────────────────┘
 ```
 
 ## 项目结构
@@ -36,8 +42,9 @@ LBU_agent/
 │   ├── storage.py           # 历史对话存储（MySQL 落库，仅展示用，不参与上下文）
 │   ├── agent/
 │   │   ├── llm.py           # LLM 工厂（ChatOllama，参数来自 .env）
-│   │   ├── prompt.py        # 贴合 LBU 的 system prompt
-│   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空上下文）
+│   │   ├── prompt.py        # 贴合 LBU 的 system prompt（产品知识改走 RAG 检索）
+│   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空/压缩/回滚）
+│   │   ├── rag.py           # RAG：docs/LBU.md 父子文档检索（Chroma + HuggingFace embedding）
 │   │   ├── tools.py         # 工具注册（内置工具 + 后续 LBU 业务工具）
 │   │   └── graph.py         # create_agent 构建 LangGraph agent
 │   └── api/
@@ -75,9 +82,21 @@ uv run uvicorn main:app --reload --port 8000
 | `MYSQL_DATABASE` | 库名（与 LinkBetweenUs 共用同一实例） | `Link_Between_Us` |
 | `MYSQL_USER` | MySQL 用户 | `root` |
 | `MYSQL_PASSWORD` | MySQL 密码 | 空 |
+| `EMBEDDING_MODEL_NAME` | RAG embedding 模型（HuggingFace） | `Qwen/Qwen3-Embedding-0.6B` |
+| `EMBEDDING_DEVICE` | embedding 推理设备 | `cpu` |
+| `CHROMA_PERSIST_DIR` | Chroma 向量库持久化目录 | `./chroma_db` |
+| `LBU_DOC_PATH` | RAG 参考文档路径 | `docs/LBU.md` |
+| `RAG_TOP_K` | 单次检索返回的父文档数 | `4` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
+
+### RAG（产品文档检索增强）
+
+父子文档模式：`docs/LBU.md` 先按 Markdown 标题（#/##/###/####）切成父文档，
+每个父文档再按 200 字 chunk / 50 字重合切成子文档写入 Chroma；检索时子文档
+命中后映射回父文档去重返回。启动时按文档 md5 增量重建，文档未变则复用已有
+向量不重复 embedding。首次运行需从 HuggingFace 下载 embedding 模型（约 1.2GB）。
 
 ## HTTP API
 
@@ -98,6 +117,7 @@ uv run uvicorn main:app --reload --port 8000
 
 - `get_current_time` — 当前时间
 - `check_lbu_backend_health` — 探测 LinkBetweenUs 后端在线状态
+- `search_lbu_docs` — RAG 检索 LBU 产品文档（父子文档模式，LBU 产品问题优先走此工具）
 
 ## 扩展路线（按需逐步搭建）
 

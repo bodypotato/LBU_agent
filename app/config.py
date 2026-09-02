@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     mysql_user: str = "root"
     mysql_password: str = ""
 
+    # ---- RAG（LBU 产品文档检索增强）----
+    embedding_model_name: str = "Qwen/Qwen3-Embedding-0.6B"
+    embedding_device: str = "cpu"
+    chroma_persist_dir: str = "./chroma_db"
+    lbu_doc_path: str = "docs/LBU.md"
+    rag_top_k: int = 4
+
     @property
     def ollama_native_url(self) -> str:
         """Ollama 原生 API 地址。
