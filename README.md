@@ -85,18 +85,29 @@ uv run uvicorn main:app --reload --port 8000
 | `EMBEDDING_MODEL_NAME` | RAG embedding 模型（HuggingFace） | `Qwen/Qwen3-Embedding-0.6B` |
 | `EMBEDDING_DEVICE` | embedding 推理设备 | `cpu` |
 | `CHROMA_PERSIST_DIR` | Chroma 向量库持久化目录 | `./chroma_db` |
-| `LBU_DOC_PATH` | RAG 参考文档路径 | `docs/LBU.md` |
+| `RAG_DOC_DIR` | RAG 文档目录（全部 .md 均为文档源） | `docs` |
 | `RAG_TOP_K` | 单次检索返回的父文档数 | `4` |
+| `SUMMARY_TRIGGER_MESSAGES` | 消息数达到该值时触发上下文压缩 | `20` |
+| `SUMMARY_KEEP_MESSAGES` | 压缩后保留的最新消息数 | `4` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
 
 ### RAG（产品文档检索增强）
 
-父子文档模式：`docs/LBU.md` 先按 Markdown 标题（#/##/###/####）切成父文档，
-每个父文档再按 200 字 chunk / 50 字重合切成子文档写入 Chroma；检索时子文档
-命中后映射回父文档去重返回。启动时按文档 md5 增量重建，文档未变则复用已有
-向量不重复 embedding。首次运行需从 HuggingFace 下载 embedding 模型（约 1.2GB）。
+父子文档模式：`RAG_DOC_DIR` 下全部 .md 先按 Markdown 标题（#/##/###/####）
+切成父文档，每个父文档再按 200 字 chunk / 50 字重合切成子文档写入 Chroma；
+检索时子文档命中后映射回父文档去重返回。多文档按文件分类存储（source=文件
+路径、category=所在目录），检索默认全库、可按分类过滤。按文件 md5 增量重建：
+新增/修改的文件只重建自己，删除的文件自动清理向量，互不覆盖。首次运行需从
+HuggingFace 下载 embedding 模型（约 1.2GB）。
+
+### 上下文裁剪（SummarizationMiddleware）
+
+消息数达到 `SUMMARY_TRIGGER_MESSAGES`（20）时，把旧消息压缩为一段中文摘要，
+仅保留最新 `SUMMARY_KEEP_MESSAGES`（4）条。裁剪是状态级更新：经 checkpointer
+落盘 Redis，后续请求自动携带 [摘要 + 最新消息] 续聊，不会丢失关键信息；
+摘要模型与对话模型共用 `OLLAMA_MODEL`。MySQL 中的完整历史不受裁剪影响。
 
 ## HTTP API
 

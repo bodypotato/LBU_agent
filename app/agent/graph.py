@@ -3,11 +3,17 @@
 地基阶段使用 create_agent 的默认 LangGraph 结构（agent loop：模型 ↔ 工具），
 后续需要定制（多节点编排、子图、中断、多 agent 等）时，可在此基于
 langgraph 的 StateGraph 显式搭建，或替换成 create_deep_agent 等预构建方案。
+
+上下文裁剪：挂载 SummarizationMiddleware，消息数达到 SUMMARY_TRIGGER_MESSAGES
+时把旧消息压缩为一段摘要（保留最新 SUMMARY_KEEP_MESSAGES 条）。裁剪结果作为
+状态更新经 checkpointer 落盘 Redis，后续请求自动携带 [摘要 + 最新消息] 续聊；
+摘要模型与对话模型共用（OLLAMA_MODEL）。
 """
 
 from functools import lru_cache
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import SummarizationMiddleware
 from langchain_core.messages import AIMessage
 from langgraph.graph.state import CompiledStateGraph
 
@@ -15,6 +21,18 @@ from app.agent.llm import get_llm
 from app.agent.memory import memory
 from app.agent.prompt import build_system_prompt
 from app.agent.tools import get_tools
+from app.config import get_settings
+
+SUMMARY_PROMPT = """你是对话历史整理助手。请从下面的对话历史中提取最重要的信息，生成一段精炼的摘要。
+
+要求：
+- 用简体中文输出，保留用户提到的事实、需求、偏好、数字、名称等关键信息；
+- 说明已经完成的事项与结论，避免后续重复工作；
+- 只输出摘要正文，不要任何解释、标题或前缀。
+
+对话历史：
+{messages}
+"""
 
 
 @lru_cache
@@ -26,12 +44,23 @@ def build_agent() -> CompiledStateGraph:
     - tools           ← app/agent/tools.py 的注册表
     - system_prompt   ← app/agent/prompt.py（贴合 LBU 的人设）
     - checkpointer    ← ConversationMemory（thread_id 粒度会话记忆）
+    - middleware      ← SummarizationMiddleware（超长上下文自动压缩）
     """
+    settings = get_settings()
+    llm = get_llm()
     return create_agent(
-        model=get_llm(),
+        model=llm,
         tools=get_tools(),
         system_prompt=build_system_prompt(),
         checkpointer=memory.checkpointer,
+        middleware=[
+            SummarizationMiddleware(
+                model=llm,  # 摘要模型与对话模型共用
+                trigger=("messages", settings.summary_trigger_messages),
+                keep=("messages", settings.summary_keep_messages),
+                summary_prompt=SUMMARY_PROMPT,
+            )
+        ],
     )
 
 
