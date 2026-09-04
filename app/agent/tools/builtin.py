@@ -1,34 +1,11 @@
-"""内置工具：时间查询、后端健康探测、RAG 产品文档检索。"""
+"""内置工具：RAG 产品文档检索（依赖 Chroma/embedding，留在 agent 进程）。
 
-from datetime import datetime
+时间查询、后端健康探测等通用能力已迁入 lbu-tools MCP 服务（app/mcp/）。
+"""
 
-import httpx
 from langchain_core.tools import tool
 
 from app.agent.rag import rag
-from app.config import get_settings
-
-
-@tool
-def get_current_time() -> str:
-    """获取当前日期和时间（北京时区为 UTC+8，返回 ISO 格式，不含时区换算）。"""
-    return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-@tool
-def check_lbu_backend_health() -> str:
-    """探测 LinkBetweenUs 后端服务是否在线可达。
-
-    返回后端地址及连通状态，供回答"服务是否正常"类问题时使用。
-    """
-    settings = get_settings()
-    base = settings.lbu_backend_base_url.rstrip("/")
-    try:
-        resp = httpx.get(f"{base}/error", timeout=3.0)
-        # /error 是后端白名单路径，无 JWT 也可访问，连通即代表服务在线
-        return f"LinkBetweenUs 后端（{base}）在线，HTTP 状态码 {resp.status_code}。"
-    except httpx.HTTPError:
-        return f"LinkBetweenUs 后端（{base}）当前不可达，服务可能未启动。"
 
 
 @tool
@@ -53,7 +30,5 @@ def search_lbu_docs(query: str) -> str:
 
 
 BUILTIN_TOOLS: list = [
-    get_current_time,
-    check_lbu_backend_health,
     search_lbu_docs,
 ]

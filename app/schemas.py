@@ -60,6 +60,7 @@ class HealthData(BaseModel):
     model: str
     ollama_base_url: str
     ollama_reachable: bool
+    mcp_reachable: bool
 
 
 # ---- /api/agent/tools ----

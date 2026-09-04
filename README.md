@@ -17,18 +17,27 @@ LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGrap
                                               │ LangGraph 状态图        │
                                               │  create_agent          │
                                               │  ├─ model: ChatOllama  │
-                                              │  ├─ tools: 内置+LBU工具 │
+                                              │  ├─ tools: 内置 + MCP   │
                                               │  └─ checkpointer(记忆)  │
-                                              └─────┬─────────┬───────────┘
-                                                    │         │
-                                          Ollama (qwen3:4b)  Redis (会话持久化)
-                                                              │
-                                                    ┌─────────┴─────────────────┐
-                                                    │ RAG（父子文档检索）        │
-                                                    │  docs/LBU.md ─▶ Chroma 向量库│
-                                                    │  + Qwen3-Embedding-0.6B   │
-                                                    └───────────────────────────┘
+                                              └───┬─────────┬───────────┘
+                                                  │         │
+                                        Ollama (qwen3:4b)  Redis (会话持久化)
+                                            │
+                                            │ MCP(streamable HTTP :8765)
+                                            ▼
+                              ┌─────────────────────────────┐
+                              │ lbu-tools MCP 服务(独立进程)  │
+                              │  文件 / 时间 / 后端健康 / 联网  │
+                              │  (后续: LBU 业务工具也走这里)   │
+                              └─────────────────────────────┘
 ```
+
+Agent 的工具体系规范化后分两层：
+
+- **进程内置工具**：RAG 产品文档检索、技能加载（与 agent 配置/内存耦合）
+- **MCP 工具**：通用能力（文件/时间/后端健康/联网）托管在 lbu-tools MCP 服务
+  （独立进程），agent 经 `langchain-mcp-adapters` 动态加载；后续 LBU 业务工具
+  （好友/聊天/群组等）同样走 MCP 接入，agent 侧不再逐个新增工具模块
 
 ## 项目结构
 
@@ -47,11 +56,15 @@ LBU_agent/
 │   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空/压缩/回滚）
 │   │   ├── rag.py           # RAG：docs/LBU.md 父子文档检索（Chroma + HuggingFace embedding）
 │   │   ├── skills.py        # 技能系统：扫描 skills/ 下 SKILL.md，渐进披露 + /命令渲染
-│   │   ├── tools/           # 工具包：统一注册（__init__.py）+ 各能力模块
-│   │   │   ├── builtin.py   # 内置工具（时间 / 后端健康 / RAG 检索）
-│   │   │   ├── file_tools.py # 工作区文件读写
+│   │   ├── mcp_client.py    # MCP 客户端：加载 lbu-tools 工具（不可达时降级）
+│   │   ├── tools/           # 内置工具注册（__init__.py 统一注册入口）
+│   │   │   ├── builtin.py   # RAG 产品文档检索
 │   │   │   └── skill_tools.py # load_skill 技能加载
-│   │   └── graph.py         # create_agent 构建 LangGraph agent
+│   │   └── graph.py         # create_agent 构建 LangGraph agent（异步构建）
+│   ├── mcp/                 # lbu-tools MCP 服务（通用能力工具宿主，独立进程）
+│   │   ├── server.py        # FastMCP 服务（streamable HTTP，uv run python -m app.mcp.server）
+│   │   ├── tools.py         # 通用工具：文件（工作区沙箱）/时间/后端健康/联网
+│   │   └── process.py       # 主服务启动时自动拉起/回收 MCP 子进程
 │   └── api/
 │       └── routes.py        # HTTP API（/api/agent/*）
 └── test_main.http           # 接口自测脚本（REST Client）
@@ -97,6 +110,10 @@ uv run uvicorn main:app --reload --port 8000
 | `AGENT_WORKSPACE_DIR` | 文件工具读写根目录（相对进程工作目录） | `workspace` |
 | `FILE_MAX_READ_CHARS` | `read_file` 单次返回的字符上限 | `8000` |
 | `SKILLS_DIR` | 技能根目录（`<SKILLS_DIR>/<技能名>/SKILL.md`） | `skills` |
+| `MCP_SERVER_PORT` | lbu-tools MCP 监听端口（仅 127.0.0.1） | `8765` |
+| `MCP_SERVER_URL` | agent 客户端连接地址 | `http://127.0.0.1:8765/mcp` |
+| `WEB_FETCH_TIMEOUT` | 网页抓取超时（秒） | `10` |
+| `WEB_MAX_FETCH_CHARS` | `web_fetch` 单次返回的纯文本字符上限 | `12000` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
@@ -126,22 +143,43 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 | POST | `/api/agent/chat` | 对话。body: `{message, thread_id?}`；返回 `{reply, thread_id}`。成功后自动写入 MySQL 历史 |
 | DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文与历史记录 |
 | GET | `/api/agent/history/{thread_id}` | 查询历史记录（仅展示用，按时间正序） |
-| GET | `/api/agent/tools` | 列出已注册工具 |
-| GET | `/api/agent/health` | 健康检查（含 Ollama 连通性） |
+| GET | `/api/agent/tools` | 列出已注册工具（内置 + MCP） |
+| GET | `/api/agent/health` | 健康检查（含 Ollama 与 MCP 连通性，`data.mcp_reachable`） |
 
 `thread_id` 是本 agent 自己的会话标识：同一用户与 AI 助手的连续对话传同一个
 `thread_id` 即可延续上下文。
 
-## 已注册工具（地基阶段）
+## 已注册工具
 
-- `get_current_time` — 当前时间
-- `check_lbu_backend_health` — 探测 LinkBetweenUs 后端在线状态
+**进程内置**（agent 进程内注册）：
+
 - `search_lbu_docs` — RAG 检索 LBU 产品文档（父子文档模式，LBU 产品问题优先走此工具）
+- `load_skill` — 加载技能说明正文或技能目录下的资源文件（渐进披露）
+
+**经 MCP（lbu-tools 服务）**：
+
 - `list_files` — 列出工作区目录内容
 - `read_file` — 读取工作区文本文件（超长截断）
 - `write_file` — 写入/覆盖工作区文件（自动创建父目录）
 - `append_file` — 向工作区文件追加内容
-- `load_skill` — 加载技能说明正文或技能目录下的资源文件（渐进披露）
+- `get_current_time` — 当前时间
+- `check_lbu_backend_health` — 探测 LinkBetweenUs 后端在线状态
+- `web_fetch` — 抓取网页转纯文本（超长截断，联网查询用）
+
+### MCP（lbu-tools 工具服务）
+
+工具体系规范化后，通用能力与后续业务能力都托管在 **MCP 服务**（官方
+Python SDK 的 FastMCP，streamable HTTP 传输，仅监听 127.0.0.1），agent
+经 `langchain-mcp-adapters` 动态加载工具，不再逐个写进 agent 进程：
+
+- **启动**：主服务（main.py）启动时自动探测并拉起 MCP 子进程，退出时回收；
+  也支持独立运行（`uv run python -m app.mcp.server`），供 Claude Desktop 等
+  外部 MCP 客户端直连；
+- **降级**：MCP 服务不可达时 agent 仍可用内置工具（RAG/技能）照常服务，
+  只记日志；服务恢复后重启主服务即可重新挂载；
+- **沙箱不变**：文件工具的工作区沙箱约束在 MCP 侧原样保留（越界路径拒绝）；
+- **扩展**：新增通用工具只需在 `app/mcp/tools.py` 加函数并在 `register_tools`
+  注册；后续 LBU 业务工具（好友/聊天/群组）也走 MCP 接入。
 
 ### 文件工具（工作区沙箱）
 
@@ -173,8 +211,9 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 
 ## 扩展路线（按需逐步搭建）
 
-1. **LBU 业务工具**：在 `app/agent/tools/` 下按后端模块组织（friend / chat / group /
-   online / user），通过后端 REST API（JWT）读取真实数据。
+1. **LBU 业务工具（走 MCP）**：在 lbu-tools MCP 服务中按后端模块组织（friend /
+   chat / group / online / user），通过后端 REST API（JWT）读取真实数据，
+   agent 侧零改动自动获得新工具。
 2. **持久化记忆**：已完成 `InMemorySaver` → `AsyncRedisSaver`，会话历史落盘 Redis，
    服务重启上下文不丢；每次对话后调用 `aprune`（keep_latest）把 checkpoint
    压缩为每会话一条（覆盖式，非 TTL，不丢上下文）。

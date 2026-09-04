@@ -1,32 +1,26 @@
-"""工具包：统一注册入口。
+"""工具包：统一注册入口（内置工具 + MCP 工具）。
 
-内置工具（builtin.py）：
-- get_current_time            通用时间查询
-- check_lbu_backend_health   探测 LinkBetweenUs 后端是否在线
-- search_lbu_docs            RAG 检索 LBU 产品文档（docs/LBU.md，父子文档模式）
+内置工具（agent 进程内）：
+- builtin.py：search_lbu_docs（RAG 依赖 Chroma/embedding，留在 agent 进程）
+- skill_tools.py：load_skill（技能加载，与 agent 配置/提示词耦合）
 
-文件工具（file_tools.py）：
-- list_files / read_file / write_file / append_file
-                              工作区内文件读写（AGENT_WORKSPACE_DIR 沙箱）
-
-技能工具（skill_tools.py）：
-- load_skill                  加载技能说明正文/资源文件（渐进披露，SKILLS_DIR）
-
-后续按需在本包下按模块扩展 LBU 业务工具
-（friend / chat / group / online / user ...），扩展后在 BUILTIN_TOOLS 统一注册。
+通用能力工具（文件/时间/后端健康/联网）已迁入 lbu-tools MCP 服务
+（app/mcp/server.py，独立进程，streamable HTTP），经 app/agent/mcp_client.py
+异步加载。后续 LBU 业务工具（好友/聊天/群组等）也走 MCP 接入，本包不再
+逐个新增工具模块。
 """
 
+from app.agent.mcp_client import load_mcp_tools
 from app.agent.tools.builtin import BUILTIN_TOOLS
-from app.agent.tools.file_tools import FILE_TOOLS
 from app.agent.tools.skill_tools import SKILL_TOOLS
 
-# create_agent 的 tools 参数从这里取，后续新增工具只需加入 BUILTIN_TOOLS。
-BUILTIN_TOOLS: list = [*BUILTIN_TOOLS, *FILE_TOOLS, *SKILL_TOOLS]
+# 进程内工具清单（MCP 工具在 get_tools 时动态加载）。
+BUILTIN_TOOLS: list = [*BUILTIN_TOOLS, *SKILL_TOOLS]
 
 
-def get_tools() -> list:
-    """返回注册给 agent 的全部工具。"""
-    return list(BUILTIN_TOOLS)
+async def get_tools() -> list:
+    """返回注册给 agent 的全部工具（内置 + MCP）。"""
+    return [*BUILTIN_TOOLS, *await load_mcp_tools()]
 
 
-__all__ = ["BUILTIN_TOOLS", "get_tools"]
+__all__ = ["get_tools"]

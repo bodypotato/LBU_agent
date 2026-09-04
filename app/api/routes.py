@@ -15,6 +15,7 @@ from app.agent import build_agent, extract_final_answer, get_tools
 from app.agent.memory import memory
 from app.agent.skills import render_slash_message
 from app.config import get_settings
+from app.mcp import mcp_reachable
 from app.schemas import (
     ChatData,
     ChatRequest,
@@ -42,7 +43,8 @@ async def chat(req: ChatRequest) -> Result[ChatData]:
     message = render_slash_message(req.message)
     started_at_ms = time.time() * 1000
     try:
-        result = await build_agent().ainvoke(
+        agent = await build_agent()
+        result = await agent.ainvoke(
             {"messages": [HumanMessage(content=message)]},
             config=config,
         )
@@ -89,10 +91,10 @@ async def get_history(thread_id: str) -> Result[list[HistoryMessage]]:
 
 @router.get("/tools", response_model=Result[list[ToolInfo]])
 async def list_tools() -> Result[list[ToolInfo]]:
-    """列出当前注册给 agent 的全部工具。"""
+    """列出当前注册给 agent 的全部工具（内置 + MCP）。"""
     tools = [
         ToolInfo(name=t.name, description=t.description or "")
-        for t in get_tools()
+        for t in await get_tools()
     ]
     return Result.ok(tools)
 
@@ -103,20 +105,23 @@ async def list_tools() -> Result[list[ToolInfo]]:
     responses={200: {"model": Result[HealthData]}},
 )
 async def health() -> Result[HealthData]:
-    """健康检查：agent 配置与 Ollama 连通性。"""
+    """健康检查：agent 配置、Ollama 与 MCP 工具服务的连通性。"""
     settings = get_settings()
     try:
         httpx.get(f"{settings.ollama_native_url}/api/tags", timeout=3.0)
         reachable = True
     except httpx.HTTPError:
         reachable = False
+    mcp_ok = await mcp_reachable()
+    ok = reachable and mcp_ok
 
     return Result.ok(
         HealthData(
-            status="ok" if reachable else "degraded",
+            status="ok" if ok else "degraded",
             model=settings.ollama_model,
             ollama_base_url=settings.ollama_base_url,
             ollama_reachable=reachable,
+            mcp_reachable=mcp_ok,
         )
     )
 

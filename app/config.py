@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # ---- 技能系统（SKILL.md 渐进披露，对齐 Claude Code 用法）----
     skills_dir: str = "skills"  # 技能根目录：<skills_dir>/<技能名>/SKILL.md
 
+    # ---- MCP（lbu-tools 工具服务，通用能力工具宿主）----
+    mcp_server_port: int = 8765  # lbu-tools 监听端口（仅 127.0.0.1）
+    mcp_server_url: str = "http://127.0.0.1:8765/mcp"  # agent 客户端连接地址
+
+    # ---- 联网工具（web_fetch，挂在 MCP 上）----
+    web_fetch_timeout: float = 10.0  # 网页抓取超时（秒）
+    web_max_fetch_chars: int = 12000  # 单次返回网页纯文本的字符上限
+
     @property
     def ollama_native_url(self) -> str:
         """Ollama 原生 API 地址。

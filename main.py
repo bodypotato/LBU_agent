@@ -17,10 +17,13 @@ from app.api.routes import router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动顺序：先建立 Redis checkpointer 连接，再构建 LangGraph 图（图编译时绑定 checkpointer）
+    # 启动顺序：先建立 Redis checkpointer 连接，再拉起 MCP 工具服务，
+    # 最后构建 LangGraph 图（图编译时绑定 checkpointer 并加载 MCP 工具）
     from app.agent import build_agent
+    from app.agent.mcp_client import clear_mcp_tools_cache, close_mcp_client
     from app.agent.memory import memory
     from app.agent.rag import rag
+    from app.mcp import start_mcp_server, stop_mcp_server
     from app.storage import storage
 
     await memory.setup()
@@ -36,8 +39,14 @@ async def lifespan(app: FastAPI):
         logging.getLogger(__name__).warning(
             "RAG 初始化失败（产品文档检索暂不可用）: %s", e
         )
-    build_agent()
-    yield
+    mcp_proc = await start_mcp_server()  # MCP 已在运行则复用；失败只降级不影响主服务
+    clear_mcp_tools_cache()  # 确保按最新连接状态加载 MCP 工具
+    await build_agent()
+    try:
+        yield
+    finally:
+        await close_mcp_client()
+        stop_mcp_server(mcp_proc)
 
 
 app = FastAPI(

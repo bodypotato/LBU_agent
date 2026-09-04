@@ -1,17 +1,25 @@
-"""文件读写工具：在 agent 专属工作区（AGENT_WORKSPACE_DIR）内读写文件。
+"""lbu-tools 的通用能力工具：文件（工作区沙箱）/ 时间 / 后端健康 / 网页抓取。
 
-安全约定：
-- 所有路径都相对工作区根目录解析，越出工作区的路径（绝对路径、.. 跳级等）
-  一律拒绝，防止 agent 误读写项目源码、系统文件或用户敏感文件；
-- read_file 单次读取有字符上限（FILE_MAX_READ_CHARS），超出部分截断并明确
-  提示，避免大文件内容撑爆对话上下文。
+自 app/agent/tools 迁移而来，改挂 FastMCP；安全约定不变：
+- 文件工具只读写 AGENT_WORKSPACE_DIR 工作区，越界路径（绝对路径、.. 跳级）
+  一律拒绝，防止误读写项目源码、系统文件或用户敏感文件；
+- read_file 单次读取有字符上限（FILE_MAX_READ_CHARS），超长截断提示；
+- web_fetch 只抓 http(s) 文本页，转纯文本后按 WEB_MAX_FETCH_CHARS 截断。
 """
 
+import re
+from datetime import datetime
+from html import unescape
 from pathlib import Path
 
-from langchain_core.tools import tool
+import html2text
+import httpx
+from mcp.server.fastmcp import FastMCP
 
 from app.config import get_settings
+
+
+# ===== 文件工具（工作区沙箱）=====
 
 
 def _workspace_root() -> Path:
@@ -32,7 +40,6 @@ def _resolve_in_workspace(path: str) -> Path:
     return candidate
 
 
-@tool
 def list_files(path: str = "") -> str:
     """列出工作区中指定目录的内容。
 
@@ -61,7 +68,6 @@ def list_files(path: str = "") -> str:
     return f"目录 {path or '工作区根目录'} 的内容：\n" + "\n".join(lines)
 
 
-@tool
 def read_file(path: str) -> str:
     """读取工作区中指定文本文件的内容。
 
@@ -91,7 +97,6 @@ def read_file(path: str) -> str:
     return head
 
 
-@tool
 def write_file(path: str, content: str) -> str:
     """把内容写入工作区中的文件（文件已存在则覆盖，父目录不存在会自动创建）。
 
@@ -112,7 +117,6 @@ def write_file(path: str, content: str) -> str:
     return f"已写入文件：{target}（{len(content)} 字符）"
 
 
-@tool
 def append_file(path: str, content: str) -> str:
     """在文件末尾追加内容（文件不存在则自动创建）。
 
@@ -134,9 +138,80 @@ def append_file(path: str, content: str) -> str:
     return f"已追加到文件：{target}（本次追加 {len(content)} 字符）"
 
 
-FILE_TOOLS: list = [
-    list_files,
-    read_file,
-    write_file,
-    append_file,
-]
+# ===== 时间 / 后端健康 =====
+
+
+def get_current_time() -> str:
+    """获取当前日期和时间（北京时区为 UTC+8，返回 ISO 格式，不含时区换算）。"""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def check_lbu_backend_health() -> str:
+    """探测 LinkBetweenUs 后端服务是否在线可达。
+
+    返回后端地址及连通状态，供回答"服务是否正常"类问题时使用。
+    """
+    settings = get_settings()
+    base = settings.lbu_backend_base_url.rstrip("/")
+    try:
+        resp = httpx.get(f"{base}/error", timeout=3.0)
+        # /error 是后端白名单路径，无 JWT 也可访问，连通即代表服务在线
+        return f"LinkBetweenUs 后端（{base}）在线，HTTP 状态码 {resp.status_code}。"
+    except httpx.HTTPError:
+        return f"LinkBetweenUs 后端（{base}）当前不可达，服务可能未启动。"
+
+
+# ===== 联网 =====
+
+
+def web_fetch(url: str) -> str:
+    """抓取网页并转为纯文本，供需要查看网页内容时使用。
+
+    url 是要抓取的网页地址（需要以 http:// 或 https:// 开头）。
+    返回网页标题、最终地址与正文纯文本（超长截断）；
+    图片、下载文件等非文本页面无法抓取。
+    """
+    settings = get_settings()
+    url = url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        return f"无效的网址：{url}（需要以 http:// 或 https:// 开头）。"
+    try:
+        resp = httpx.get(
+            url,
+            timeout=settings.web_fetch_timeout,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LBU-Agent/0.1"
+            },
+        )
+    except httpx.HTTPError as e:
+        return f"网页抓取失败：{e}"
+    if resp.status_code >= 400:
+        return f"网页返回错误状态码 {resp.status_code}，内容无法获取。"
+    content_type = resp.headers.get("content-type", "")
+    if "html" not in content_type and "text" not in content_type:
+        return f"该地址不是文本网页（content-type: {content_type}），无法转为纯文本。"
+    title = ""
+    if m := re.search(r"<title[^>]*>(.*?)</title>", resp.text, re.IGNORECASE | re.DOTALL):
+        title = unescape(m.group(1)).strip()
+    text = html2text.html2text(resp.text, baseurl=str(resp.url))
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    limit = settings.web_max_fetch_chars
+    head = f"网页标题：{title or '（无标题）'}\n网页地址：{resp.url}\n\n{text}"
+    if len(head) > limit:
+        head = head[:limit] + f"\n\n……（内容过长，以上为前 {limit} 字符）"
+    return head
+
+
+# ===== 注册 =====
+
+
+def register_tools(mcp: FastMCP) -> None:
+    """把全部通用工具挂到 MCP 实例上（新工具在此追加）。"""
+    mcp.tool()(list_files)
+    mcp.tool()(read_file)
+    mcp.tool()(write_file)
+    mcp.tool()(append_file)
+    mcp.tool()(get_current_time)
+    mcp.tool()(check_lbu_backend_health)
+    mcp.tool()(web_fetch)
