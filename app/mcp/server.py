@@ -14,25 +14,27 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from app.config import get_settings
+from app.mcp.lbu import register_lbu_tools
 from app.mcp.tools import register_tools
 
 logger = logging.getLogger(__name__)
 
 
 def build_mcp() -> FastMCP:
-    """构造 MCP 实例（工具清单见 app/mcp/tools.py 的 register_tools）。"""
+    """构造 MCP 实例（工具清单见 app/mcp/tools.py 与 app/mcp/lbu/）。"""
     settings = get_settings()
     mcp = FastMCP(
         "lbu-tools",
         instructions=(
-            "LinkBetweenUs 的 AI 助手通用工具集：工作区文件读写、时间查询、"
-            "后端健康探测、网页抓取。"
+            "LinkBetweenUs 的 AI 助手工具集：通用能力（工作区文件、时间、"
+            "后端健康、网页抓取）+ LBU 业务操作（资料/好友/群组/消息/在线）。"
         ),
         host="127.0.0.1",
         port=settings.mcp_server_port,
         log_level="INFO",
     )
     register_tools(mcp)
+    register_lbu_tools(mcp)
     return mcp
 
 

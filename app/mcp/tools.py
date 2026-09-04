@@ -203,6 +203,69 @@ def web_fetch(url: str) -> str:
     return head
 
 
+def web_search(query: str) -> str:
+    """用 Google 搜索查询词，返回结果的标题、链接与摘要。
+
+    当用户需要查询最新信息、事实、资讯，且没有具体网址可用时使用本工具
+    （由 Serper.dev 提供 Google 搜索结果）；如果结果里有合适的链接、
+    需要看完整内容时，再用 web_fetch 抓取那个链接。
+    """
+    settings = get_settings()
+    if not settings.serper_api_key:
+        return (
+            "搜索服务未配置（缺少 SERPER_API_KEY）。"
+            "请告知用户搜索功能暂不可用，稍后再试。"
+        )
+    try:
+        resp = httpx.post(
+            "https://google.serper.dev/search",
+            headers={
+                "X-API-KEY": settings.serper_api_key,
+                "Content-Type": "application/json",
+            },
+            json={
+                "q": query,
+                "gl": settings.web_search_region,
+                "hl": "zh-cn",
+                "num": settings.web_search_max_results,
+            },
+            timeout=settings.web_fetch_timeout,
+        )
+    except httpx.HTTPError as e:
+        return f"搜索请求失败：{e}。请告知用户稍后再试。"
+    if resp.status_code != 200:
+        return f"搜索服务返回错误状态码 {resp.status_code}。请告知用户稍后再试。"
+    data = resp.json()
+    parts = []
+    # 直接答案（天气、汇率等查询会带 answerBox）
+    if box := data.get("answerBox"):
+        title = box.get("title") or "直接答案"
+        answer = box.get("answer") or box.get("snippet") or ""
+        if answer:
+            parts.append(f"【{title}】{answer}")
+    org = data.get("organic") or []
+    if not org and not parts:
+        return "搜索没有返回任何结果。请告知用户换个关键词再试。"
+    lines = []
+    for item in org:
+        title = str(item.get("title") or "").strip()
+        link = str(item.get("link") or "").strip()
+        snippet = str(item.get("snippet") or "").strip()
+        if not title:
+            continue
+        line = f"- {title}\n  链接：{link}"
+        if snippet:
+            line += f"\n  摘要：{snippet[:300]}"
+        lines.append(line)
+    if lines:
+        parts.append("搜索结果：\n" + "\n".join(lines))
+    out = "\n\n".join(parts)
+    limit = settings.web_max_fetch_chars
+    if len(out) > limit:
+        out = out[:limit] + f"\n\n……（结果较长，以上为前 {limit} 字符）"
+    return out
+
+
 # ===== 注册 =====
 
 
@@ -215,3 +278,4 @@ def register_tools(mcp: FastMCP) -> None:
     mcp.tool()(get_current_time)
     mcp.tool()(check_lbu_backend_health)
     mcp.tool()(web_fetch)
+    mcp.tool()(web_search)

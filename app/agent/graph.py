@@ -57,7 +57,7 @@ async def build_agent() -> CompiledStateGraph:
     _agent = create_agent(
         model=llm,
         tools=tools,
-        system_prompt=build_system_prompt(),
+        system_prompt=build_system_prompt([t.name for t in tools]),
         checkpointer=memory.checkpointer,
         middleware=[
             SummarizationMiddleware(

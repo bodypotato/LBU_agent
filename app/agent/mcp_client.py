@@ -7,6 +7,10 @@ MCP 服务不可达时降级为空工具集（只记日志），agent 仍可用�
 import logging
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.interceptors import (
+    MCPToolCallRequest,
+    MCPToolCallResult,
+)
 
 from app.config import get_settings
 
@@ -16,6 +20,28 @@ _client: MultiServerMCPClient | None = None
 _tools: list | None = None
 
 
+class ThreadIdInjector:
+    """把当前会话的真实 thread_id 注入需要身份的工具参数。
+
+    LBU 业务工具声明 thread_id 参数（身份凭证按 thread_id 存于 Redis），
+    由本拦截器从 LangGraph runtime.config 取真实值覆盖模型传入的
+    参数——模型无法伪造身份，token 也不进入模型上下文。
+    """
+
+    async def __call__(
+        self,
+        request: MCPToolCallRequest,
+        handler,
+    ) -> MCPToolCallResult:
+        if "thread_id" in request.args:
+            runtime = request.runtime
+            config = getattr(runtime, "config", None) or {}
+            thread_id = (config.get("configurable") or {}).get("thread_id")
+            if thread_id:
+                request.args["thread_id"] = thread_id
+        return await handler(request)
+
+
 async def load_mcp_tools() -> list:
     """加载 lbu-tools MCP 服务的全部工具（进程内缓存）。"""
     global _client, _tools
@@ -23,7 +49,8 @@ async def load_mcp_tools() -> list:
         url = get_settings().mcp_server_url
         try:
             _client = MultiServerMCPClient(
-                {"lbu-tools": {"url": url, "transport": "http"}}
+                {"lbu-tools": {"url": url, "transport": "http"}},
+                tool_interceptors=[ThreadIdInjector()],
             )
             _tools = await _client.get_tools()
         except Exception as e:  # noqa: BLE001 —— MCP 不可达只降级，不影响主流程

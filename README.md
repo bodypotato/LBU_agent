@@ -89,6 +89,7 @@ uv run uvicorn main:app --reload --port 8000
 |---|---|---|
 | `OLLAMA_MODEL` | create_agent 的 model 来源 | `qwen3:4b` |
 | `OLLAMA_BASE_URL` | OpenAI 兼容格式地址（内部自动转换为 Ollama 原生地址） | `http://localhost:11434/v1` |
+| `OLLAMA_NUM_CTX` | Ollama 上下文窗口（默认仅 4096，装不下工具定义，必须显式加大） | `16384` |
 | `AGENT_NAME` | agent 自称 | `LBU 助手` |
 | `AGENT_TEMPERATURE` | 采样温度 | `0.7` |
 | `AGENT_TIMEOUT` | LLM 单次请求超时（秒） | `120` |
@@ -113,7 +114,10 @@ uv run uvicorn main:app --reload --port 8000
 | `MCP_SERVER_PORT` | lbu-tools MCP 监听端口（仅 127.0.0.1） | `8765` |
 | `MCP_SERVER_URL` | agent 客户端连接地址 | `http://127.0.0.1:8765/mcp` |
 | `WEB_FETCH_TIMEOUT` | 网页抓取超时（秒） | `10` |
-| `WEB_MAX_FETCH_CHARS` | `web_fetch` 单次返回的纯文本字符上限 | `12000` |
+| `WEB_MAX_FETCH_CHARS` | `web_fetch` / `web_search` 单次返回内容的字符上限 | `12000` |
+| `SERPER_API_KEY` | Serper.dev 的 API key（`web_search` 用 Google 搜索，serper.dev 注册获取） | 空 |
+| `WEB_SEARCH_MAX_RESULTS` | `web_search` 单次返回的结果条数 | `8` |
+| `WEB_SEARCH_REGION` | 搜索地区（Serper `gl` 参数） | `cn` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
@@ -140,7 +144,7 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/agent/chat` | 对话。body: `{message, thread_id?}`；返回 `{reply, thread_id}`。成功后自动写入 MySQL 历史 |
+| POST | `/api/agent/chat` | 对话。body: `{message, thread_id?, token?}`（token 也可走 `Authorization: Bearer` 头）；返回 `{reply, thread_id}`。成功后自动写入 MySQL 历史 |
 | DELETE | `/api/agent/conversation/{thread_id}` | 清空会话上下文与历史记录 |
 | GET | `/api/agent/history/{thread_id}` | 查询历史记录（仅展示用，按时间正序） |
 | GET | `/api/agent/tools` | 列出已注册工具（内置 + MCP） |
@@ -148,6 +152,28 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 
 `thread_id` 是本 agent 自己的会话标识：同一用户与 AI 助手的连续对话传同一个
 `thread_id` 即可延续上下文。
+
+### LBU 业务工具（代替用户操作）
+
+MCP 上还挂着 40 个业务工具（`app/mcp/lbu/`，按模块组织），覆盖人在 LBU
+客户端里能做的操作：用户资料（改昵称/查资料）、好友（搜索/申请/同意/
+拒绝/列表/删除/备注）、群组（建群/改名/解散/成员管理/禁言/入群审批/
+群消息）、消息（单聊/群聊发送、聊天记录、会话列表、已读、删除）、在线状态。
+
+**身份约定**：后端"登录即顶号"（每次登录使旧 token 失效），因此 agent
+不自建凭证——调用方随 chat 请求把用户的 JWT 传过来（body 的 `token`
+字段或 `Authorization: Bearer` 头），agent 按 thread_id 暂存到 Redis
+（`lbu:agent:token:*`，TTL 48h），MCP 工具按会话取 token 调后端。
+**token 不进入模型上下文**（拦截器注入 thread_id、工具侧查 Redis），
+模型也无法伪造身份。token 过期（24h）或顶号后，工具会提示用户重新登录。
+
+发消息走 STOMP WebSocket（后端无 REST 发消息端点），MCP 内实现最小
+STOMP 客户端（CONNECT → SEND → 等回执），支持多端同时在线。
+
+**小模型适配**（已实测校准）：qwen3:4b 面对 50 个工具时选择能力会失效，
+两个必要措施——① `OLLAMA_NUM_CTX` 显式加大（Ollama 默认 4096 会截断
+工具定义，症状是模型声称"没有这个功能"）；② system prompt 内置按类别
+分组的工具目录（名称 + 一句话用途），帮助模型快速定位工具。
 
 ## 已注册工具
 
@@ -165,6 +191,7 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 - `get_current_time` — 当前时间
 - `check_lbu_backend_health` — 探测 LinkBetweenUs 后端在线状态
 - `web_fetch` — 抓取网页转纯文本（超长截断，联网查询用）
+- `web_search` — Google 搜索（Serper.dev，返回标题/链接/摘要与直接答案；未配置 key 时优雅降级）
 
 ### MCP（lbu-tools 工具服务）
 

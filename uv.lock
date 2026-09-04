@@ -1429,6 +1429,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -1454,6 +1455,7 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=6.0.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.52" },
     { name = "uvicorn", specifier = ">=0.52.4" },
+    { name = "websockets", specifier = ">=16.1.1" },
 ]
 
 [[package]]
