@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage
 
 from app.agent import build_agent, extract_final_answer, get_tools
 from app.agent.memory import memory
+from app.agent.skills import render_slash_message
 from app.config import get_settings
 from app.schemas import (
     ChatData,
@@ -37,10 +38,12 @@ async def chat(req: ChatRequest) -> Result[ChatData]:
     """
     config = memory.config_for(req.thread_id)
     thread_id = config["configurable"]["thread_id"]
+    # /技能名 开头的消息按斜杠命令处理：命中技能则拼接技能正文，未命中则改写为提示
+    message = render_slash_message(req.message)
     started_at_ms = time.time() * 1000
     try:
         result = await build_agent().ainvoke(
-            {"messages": [HumanMessage(content=req.message)]},
+            {"messages": [HumanMessage(content=message)]},
             config=config,
         )
     except Exception as e:  # noqa: BLE001 —— 统一转 Result 错误，避免 500 裸堆栈

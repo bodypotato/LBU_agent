@@ -2,8 +2,10 @@
 
 LBU 产品知识不再写死在 prompt 里，而是通过 search_lbu_docs 工具
 检索 docs/LBU.md（父子文档 RAG）获得，保证文档更新后回答同步更新。
+已安装技能的清单（名称 + 一句话描述）来自 skills/ 目录，随 prompt 注入。
 """
 
+from app.agent.skills import build_skills_prompt_section
 from app.config import get_settings
 
 
@@ -24,4 +26,6 @@ def build_system_prompt() -> str:
   专属工作区内完成；操作成功后告知用户文件所在路径，失败时如实说明原因。
 - 涉及用户隐私的数据只在用户本人授权范围内操作和展示。
 - 回复中不要暴露内部实现细节（如工具名、接口路径、模型名）。
+
+{build_skills_prompt_section()}
 """

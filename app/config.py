@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     agent_workspace_dir: str = "workspace"  # 文件工具读写根目录（相对进程工作目录）
     file_max_read_chars: int = 8000  # read_file 单次返回的字符上限
 
+    # ---- 技能系统（SKILL.md 渐进披露，对齐 Claude Code 用法）----
+    skills_dir: str = "skills"  # 技能根目录：<skills_dir>/<技能名>/SKILL.md
+
     @property
     def ollama_native_url(self) -> str:
         """Ollama 原生 API 地址。

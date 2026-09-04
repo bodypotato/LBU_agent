@@ -36,6 +36,7 @@ LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGrap
 LBU_agent/
 ├── .env                     # 全部配置（create_agent 参数、agent 行为、LBU 后端地址）
 ├── main.py                  # FastAPI 入口（启动时预热 agent）
+├── skills/                  # 技能目录：每个子目录一个技能（SKILL.md，对齐 Claude Code 用法）
 ├── app/
 │   ├── config.py            # pydantic-settings 读取 .env
 │   ├── schemas.py           # 请求/响应模型（沿用 LBU 的 Result{code,message,data} 约定）
@@ -45,8 +46,11 @@ LBU_agent/
 │   │   ├── prompt.py        # 贴合 LBU 的 system prompt（产品知识改走 RAG 检索）
 │   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空/压缩/回滚）
 │   │   ├── rag.py           # RAG：docs/LBU.md 父子文档检索（Chroma + HuggingFace embedding）
-│   │   ├── tools.py         # 工具注册（内置工具 + 后续 LBU 业务工具）
-│   │   ├── tools/           # 工具子包（file_tools.py：工作区文件读写）
+│   │   ├── skills.py        # 技能系统：扫描 skills/ 下 SKILL.md，渐进披露 + /命令渲染
+│   │   ├── tools/           # 工具包：统一注册（__init__.py）+ 各能力模块
+│   │   │   ├── builtin.py   # 内置工具（时间 / 后端健康 / RAG 检索）
+│   │   │   ├── file_tools.py # 工作区文件读写
+│   │   │   └── skill_tools.py # load_skill 技能加载
 │   │   └── graph.py         # create_agent 构建 LangGraph agent
 │   └── api/
 │       └── routes.py        # HTTP API（/api/agent/*）
@@ -92,6 +96,7 @@ uv run uvicorn main:app --reload --port 8000
 | `SUMMARY_KEEP_MESSAGES` | 压缩后保留的最新消息数 | `4` |
 | `AGENT_WORKSPACE_DIR` | 文件工具读写根目录（相对进程工作目录） | `workspace` |
 | `FILE_MAX_READ_CHARS` | `read_file` 单次返回的字符上限 | `8000` |
+| `SKILLS_DIR` | 技能根目录（`<SKILLS_DIR>/<技能名>/SKILL.md`） | `skills` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
@@ -136,6 +141,7 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 - `read_file` — 读取工作区文本文件（超长截断）
 - `write_file` — 写入/覆盖工作区文件（自动创建父目录）
 - `append_file` — 向工作区文件追加内容
+- `load_skill` — 加载技能说明正文或技能目录下的资源文件（渐进披露）
 
 ### 文件工具（工作区沙箱）
 
@@ -143,6 +149,27 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 越出工作区的路径（绝对路径、`..` 跳级等）一律拒绝，防止 agent 误读写项目
 源码或系统文件。`read_file` 单次最多返回 `FILE_MAX_READ_CHARS` 字符，超出
 截断并提示，可分次续读。
+
+### 技能系统（skill）
+
+对齐 Claude Code 的 SKILL.md 用法，在 `SKILLS_DIR`（默认 `skills/`）下按目录
+组织技能，每个技能一个 `SKILL.md`：首部 YAML frontmatter 写 `name`（可选）和
+`description`（一句话，决定何时触发），正文是给模型的完整指令。技能目录下
+除 SKILL.md 外的文件是资源文件，可用 `load_skill` 的 `resource` 参数按需读取。
+
+触发方式：
+
+- **斜杠命令（推荐，确定性）**：用户发 `/技能名 具体内容`，服务端自动把技能
+  正文拼进消息，不依赖模型判断。已实测通过。
+- **模型自选（渐进披露）**：技能清单（名称 + 描述）注入 system prompt，
+  模型觉得相关时调用 `load_skill` 加载正文。机制已通，但 qwen3:4b 实测
+  倾向直接用基础工具完成任务、跳过技能加载——小模型的自选触发不可靠，
+  换更大模型（qwen3:8b/14b 或云端模型）后此路径会更好用。
+
+技能正文写法建议：短小、中文、自然语言步骤，不要要求严格格式输出
+（qwen3:4b 结构化输出不可靠）；复杂任务拆成多个小技能。新增技能后，
+`load_skill` 工具与 /命令立即生效，system prompt 清单需重启服务刷新。
+示例见 `skills/write-report/`。
 
 ## 扩展路线（按需逐步搭建）
 
