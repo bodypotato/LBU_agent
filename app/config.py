@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     summary_trigger_messages: int = 20  # 消息数达到该值触发压缩
     summary_keep_messages: int = 4  # 压缩后保留的最新消息数
 
+    # ---- 文件工具（agent 专属工作区）----
+    agent_workspace_dir: str = "workspace"  # 文件工具读写根目录（相对进程工作目录）
+    file_max_read_chars: int = 8000  # read_file 单次返回的字符上限
+
     @property
     def ollama_native_url(self) -> str:
         """Ollama 原生 API 地址。

@@ -1,13 +1,4 @@
-"""工具注册。
-
-内置工具：
-- get_current_time            通用时间查询
-- check_lbu_backend_health   探测 LinkBetweenUs 后端是否在线
-- search_lbu_docs            RAG 检索 LBU 产品文档（docs/LBU.md，父子文档模式）
-
-后续按需在 app/agent/tools/ 下按模块扩展 LBU 业务工具
-（friend / chat / group / online / user ...），扩展后在此统一注册。
-"""
+"""内置工具：时间查询、后端健康探测、RAG 产品文档检索。"""
 
 from datetime import datetime
 
@@ -16,8 +7,6 @@ from langchain_core.tools import tool
 
 from app.agent.rag import rag
 from app.config import get_settings
-
-# ===== 内置工具 =====
 
 
 @tool
@@ -42,9 +31,6 @@ def check_lbu_backend_health() -> str:
         return f"LinkBetweenUs 后端（{base}）当前不可达，服务可能未启动。"
 
 
-# ===== RAG 检索工具 =====
-
-
 @tool
 def search_lbu_docs(query: str) -> str:
     """检索 LinkBetweenUs（LBU）产品文档 docs/LBU.md 中的相关内容。
@@ -66,16 +52,8 @@ def search_lbu_docs(query: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-# ===== 统一注册入口 =====
-# create_agent 的 tools 参数从这里取，后续新增工具只需加入 BUILTIN_TOOLS。
-
 BUILTIN_TOOLS: list = [
     get_current_time,
     check_lbu_backend_health,
     search_lbu_docs,
 ]
-
-
-def get_tools() -> list:
-    """返回注册给 agent 的全部工具。"""
-    return list(BUILTIN_TOOLS)

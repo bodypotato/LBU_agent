@@ -46,6 +46,7 @@ LBU_agent/
 │   │   ├── memory.py        # 会话记忆（Redis 持久化，thread_id 粒度，支持清空/压缩/回滚）
 │   │   ├── rag.py           # RAG：docs/LBU.md 父子文档检索（Chroma + HuggingFace embedding）
 │   │   ├── tools.py         # 工具注册（内置工具 + 后续 LBU 业务工具）
+│   │   ├── tools/           # 工具子包（file_tools.py：工作区文件读写）
 │   │   └── graph.py         # create_agent 构建 LangGraph agent
 │   └── api/
 │       └── routes.py        # HTTP API（/api/agent/*）
@@ -89,6 +90,8 @@ uv run uvicorn main:app --reload --port 8000
 | `RAG_TOP_K` | 单次检索返回的父文档数 | `4` |
 | `SUMMARY_TRIGGER_MESSAGES` | 消息数达到该值时触发上下文压缩 | `20` |
 | `SUMMARY_KEEP_MESSAGES` | 压缩后保留的最新消息数 | `4` |
+| `AGENT_WORKSPACE_DIR` | 文件工具读写根目录（相对进程工作目录） | `workspace` |
+| `FILE_MAX_READ_CHARS` | `read_file` 单次返回的字符上限 | `8000` |
 
 历史记录写入独立表 `LBU_Agent_Message`（启动时自动建表），与后端 `LBU_Message`
 互不干扰；MySQL 暂不可用时服务照常启动，仅历史功能降级。
@@ -129,6 +132,17 @@ HuggingFace 下载 embedding 模型（约 1.2GB）。
 - `get_current_time` — 当前时间
 - `check_lbu_backend_health` — 探测 LinkBetweenUs 后端在线状态
 - `search_lbu_docs` — RAG 检索 LBU 产品文档（父子文档模式，LBU 产品问题优先走此工具）
+- `list_files` — 列出工作区目录内容
+- `read_file` — 读取工作区文本文件（超长截断）
+- `write_file` — 写入/覆盖工作区文件（自动创建父目录）
+- `append_file` — 向工作区文件追加内容
+
+### 文件工具（工作区沙箱）
+
+文件工具只在 `AGENT_WORKSPACE_DIR`（默认 `workspace/`，已 gitignore）内读写，
+越出工作区的路径（绝对路径、`..` 跳级等）一律拒绝，防止 agent 误读写项目
+源码或系统文件。`read_file` 单次最多返回 `FILE_MAX_READ_CHARS` 字符，超出
+截断并提示，可分次续读。
 
 ## 扩展路线（按需逐步搭建）
 
