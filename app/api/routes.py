@@ -8,12 +8,15 @@ import logging
 import time
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from langchain_core.messages import HumanMessage
 
 from app.agent import build_agent, extract_final_answer, get_tools
+from app.agent.auth_context import delete_token, set_token
 from app.agent.memory import memory
+from app.agent.skills import render_slash_message
 from app.config import get_settings
+from app.mcp import mcp_reachable
 from app.schemas import (
     ChatData,
     ChatRequest,
@@ -30,17 +33,34 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 
 @router.post("/chat", response_model=Result[ChatData])
-async def chat(req: ChatRequest) -> Result[ChatData]:
-    """对话入口：message + 可选 thread_id，返回回复与本次会话 ID。
+async def chat(
+    req: ChatRequest,
+    authorization: str | None = Header(default=None, include_in_schema=False),
+) -> Result[ChatData]:
+    """对话入口：message + 可选 thread_id + 可选用户 token，返回回复与本次会话 ID。
 
     thread_id 即上下文记忆键：同一用户后续请求传回同一个 thread_id 即可延续对话。
+    token（body 或 Authorization: Bearer 头）按 thread_id 暂存，供 MCP 业务工具
+    代替用户操作 LinkBetweenUs 后端；后端"登录即顶号"，因此 agent 不自建凭证，
+    只复用调用方传来的用户 token。
     """
     config = memory.config_for(req.thread_id)
     thread_id = config["configurable"]["thread_id"]
+    # 暂存用户凭证：优先 body 的 token，其次 Authorization: Bearer 头
+    token = req.token
+    if not token and authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer" and value:
+            token = value
+    if token:
+        await set_token(thread_id, token)
+    # /技能名 开头的消息按斜杠命令处理：命中技能则拼接技能正文，未命中则改写为提示
+    message = render_slash_message(req.message)
     started_at_ms = time.time() * 1000
     try:
-        result = await build_agent().ainvoke(
-            {"messages": [HumanMessage(content=req.message)]},
+        agent = await build_agent()
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content=message)]},
             config=config,
         )
     except Exception as e:  # noqa: BLE001 —— 统一转 Result 错误，避免 500 裸堆栈
@@ -65,8 +85,9 @@ async def chat(req: ChatRequest) -> Result[ChatData]:
 
 @router.delete("/conversation/{thread_id}", response_model=Result[None])
 async def clear_conversation(thread_id: str) -> Result[None]:
-    """清空指定会话的上下文与历史记录。"""
+    """清空指定会话的上下文、历史记录与暂存凭证。"""
     await memory.clear(thread_id)
+    await delete_token(thread_id)
     try:
         await storage.clear(thread_id)
     except Exception as e:  # noqa: BLE001 —— 历史清理失败只记日志
@@ -86,10 +107,10 @@ async def get_history(thread_id: str) -> Result[list[HistoryMessage]]:
 
 @router.get("/tools", response_model=Result[list[ToolInfo]])
 async def list_tools() -> Result[list[ToolInfo]]:
-    """列出当前注册给 agent 的全部工具。"""
+    """列出当前注册给 agent 的全部工具（内置 + MCP）。"""
     tools = [
         ToolInfo(name=t.name, description=t.description or "")
-        for t in get_tools()
+        for t in await get_tools()
     ]
     return Result.ok(tools)
 
@@ -100,20 +121,23 @@ async def list_tools() -> Result[list[ToolInfo]]:
     responses={200: {"model": Result[HealthData]}},
 )
 async def health() -> Result[HealthData]:
-    """健康检查：agent 配置与 Ollama 连通性。"""
+    """健康检查：agent 配置、Ollama 与 MCP 工具服务的连通性。"""
     settings = get_settings()
     try:
         httpx.get(f"{settings.ollama_native_url}/api/tags", timeout=3.0)
         reachable = True
     except httpx.HTTPError:
         reachable = False
+    mcp_ok = await mcp_reachable()
+    ok = reachable and mcp_ok
 
     return Result.ok(
         HealthData(
-            status="ok" if reachable else "degraded",
+            status="ok" if ok else "degraded",
             model=settings.ollama_model,
             ollama_base_url=settings.ollama_base_url,
             ollama_reachable=reachable,
+            mcp_reachable=mcp_ok,
         )
     )
 

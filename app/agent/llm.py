@@ -20,4 +20,7 @@ def get_llm() -> ChatOllama:
         base_url=settings.ollama_native_url,
         temperature=settings.agent_temperature,
         timeout=settings.agent_timeout,
+        # Ollama 运行时默认 num_ctx 仅 4096，工具定义较多时会被截断，
+        # 这里显式按 .env 的 OLLAMA_NUM_CTX 设置（qwen3 支持到 26 万）
+        num_ctx=settings.ollama_num_ctx,
     )

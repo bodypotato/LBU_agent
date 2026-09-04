@@ -4,13 +4,14 @@
 后续需要定制（多节点编排、子图、中断、多 agent 等）时，可在此基于
 langgraph 的 StateGraph 显式搭建，或替换成 create_deep_agent 等预构建方案。
 
+工具来源：内置工具（RAG / 技能）+ lbu-tools MCP 服务（异步加载，见
+app/agent/mcp_client.py），因此构建过程是异步的（进程内单例，首次 await 时构建）。
+
 上下文裁剪：挂载 SummarizationMiddleware，消息数达到 SUMMARY_TRIGGER_MESSAGES
 时把旧消息压缩为一段摘要（保留最新 SUMMARY_KEEP_MESSAGES 条）。裁剪结果作为
 状态更新经 checkpointer 落盘 Redis，后续请求自动携带 [摘要 + 最新消息] 续聊；
 摘要模型与对话模型共用（OLLAMA_MODEL）。
 """
-
-from functools import lru_cache
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import SummarizationMiddleware
@@ -34,24 +35,29 @@ SUMMARY_PROMPT = """你是对话历史整理助手。请从下面的对话历史
 {messages}
 """
 
+_agent: CompiledStateGraph | None = None
 
-@lru_cache
-def build_agent() -> CompiledStateGraph:
-    """构建并编译 agent 图（进程内单例）。
+
+async def build_agent() -> CompiledStateGraph:
+    """构建并编译 agent 图（进程内单例，异步：需先加载 MCP 工具）。
 
     create_agent 的参数来源：
     - model           ← .env 的 OLLAMA_MODEL / OLLAMA_BASE_URL
-    - tools           ← app/agent/tools.py 的注册表
+    - tools           ← 内置工具 + lbu-tools MCP 工具（app/agent/tools.py）
     - system_prompt   ← app/agent/prompt.py（贴合 LBU 的人设）
     - checkpointer    ← ConversationMemory（thread_id 粒度会话记忆）
     - middleware      ← SummarizationMiddleware（超长上下文自动压缩）
     """
+    global _agent
+    if _agent is not None:
+        return _agent
     settings = get_settings()
     llm = get_llm()
-    return create_agent(
+    tools = await get_tools()
+    _agent = create_agent(
         model=llm,
-        tools=get_tools(),
-        system_prompt=build_system_prompt(),
+        tools=tools,
+        system_prompt=build_system_prompt([t.name for t in tools]),
         checkpointer=memory.checkpointer,
         middleware=[
             SummarizationMiddleware(
@@ -62,6 +68,7 @@ def build_agent() -> CompiledStateGraph:
             )
         ],
     )
+    return _agent
 
 
 def extract_final_answer(result: dict) -> str:

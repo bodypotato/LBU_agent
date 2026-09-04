@@ -36,6 +36,14 @@ class ChatRequest(BaseModel):
         default=None,
         description="会话 ID（对应 LBU 中每个用户与 ai_bot 的对话）。不传则自动新建。",
     )
+    token: str | None = Field(
+        default=None,
+        description=(
+            "用户的 LinkBetweenUs JWT（登录返回的 token），供 agent 代替用户操作"
+            "好友/群组/资料/消息时使用。不传则沿用本会话此前暂存的 token；"
+            "也可通过 Authorization: Bearer 请求头传入。"
+        ),
+    )
 
 
 class ChatData(BaseModel):
@@ -60,6 +68,7 @@ class HealthData(BaseModel):
     model: str
     ollama_base_url: str
     ollama_reachable: bool
+    mcp_reachable: bool
 
 
 # ---- /api/agent/tools ----
