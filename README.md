@@ -1,5 +1,5 @@
 # LBU Agent
-
+## demo视频链接:https://www.bilibili.com/video/BV1sMt16kEQF/?spm_id_from=333.1387.upload.video_card.click&vd_source=6f676971d37d2da03768ffee98a9923b
 LinkBetweenUs 的 AI 智能助手服务。基于 **Python + LangChain + LangGraph** 构建，
 对接本机 **Ollama**（qwen3:4b）。**独立于后端 Dify 方案的 agent**，拥有自己的
 会话记忆、工具体系和扩展路线。
